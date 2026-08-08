@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Realtime 語音主控台</title>
+<style>
+  :root{
+    --bg:        #0B0D12;
+    --panel:     #12151C;
+    --panel-2:   #171B24;
+    --line:      #23283333;
+    --line-solid:#232833;
+    --text:      #E7EAF0;
+    --muted:     #7C8496;
+    --cyan:      #4CC9F0;
+    --amber:     #F2A65A;
+    --green:     #5FD68A;
+    --red:       #FF6B6B;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Noto Sans Mono", monospace;
+    --sans: -apple-system, "Segoe UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, #131826 0%, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    display:flex;
+    flex-direction:column;
+    min-height:100vh;
+  }
+
+  /* ---------- header ---------- */
+  header{
+    padding: 20px 28px 16px;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:16px;
+    border-bottom: 1px solid var(--line-solid);
+    flex-wrap:wrap;
+  }
+  .brand .eyebrow{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .14em;
+    color: var(--muted);
+    text-transform:uppercase;
+    margin-bottom:6px;
+  }
+  .brand h1{
+    margin:0;
+    font-size: 20px;
+    font-weight: 650;
+    letter-spacing: .01em;
+  }
+  .status-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .dot{
+    width:9px; height:9px; border-radius:50%;
+    background: var(--muted);
+    box-shadow: 0 0 0 3px transparent;
+    transition: background .2s, box-shadow .2s;
+  }
+  .dot.connecting{ background: var(--amber); box-shadow:0 0 0 3px #F2A65A22; animation:pulse 1s infinite; }
+  .dot.connected{  background: var(--green); box-shadow:0 0 0 3px #5FD68A22; }
+  .dot.listening{  background: var(--green); box-shadow:0 0 0 4px #5FD68A33; animation:pulse .8s infinite; }
+  .dot.speaking{   background: var(--cyan);  box-shadow:0 0 0 4px #4CC9F033; animation:pulse .8s infinite; }
+  .dot.error{      background: var(--red);   box-shadow:0 0 0 3px #FF6B6B22; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.45;} }
+
+  /* ---------- layout ---------- */
+  main{
+    flex:1;
+    display:grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+    gap: 0;
+    max-width: 920px;
+    width:100%;
+    margin: 0 auto;
+    padding: 20px 28px 28px;
+  }
+
+  /* ---------- scope (signature element) ---------- */
+  .scope-wrap{
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--line-solid);
+    border-radius: 14px;
+    padding: 14px 16px 10px;
+    margin-bottom: 18px;
+  }
+  .scope-labels{
+    display:flex;
+    justify-content:space-between;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    letter-spacing:.04em;
+  }
+  .scope-labels span.you{ color: var(--green); }
+  .scope-labels span.assistant{ color: var(--cyan); }
+  canvas#scope{
+    width:100%;
+    height: 132px;
+    display:block;
+    border-radius:8px;
+    background: #0A0C11;
+  }
+
+  /* ---------- transcript ---------- */
+  .transcript{
+    background: var(--panel);
+    border: 1px solid var(--line-solid);
+    border-radius: 14px;
+    padding: 6px 8px;
+    overflow-y: auto;
+    min-height: 300px;
+    max-height: 46vh;
+  }
+  .empty-log{
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 28px 16px;
+    text-align:center;
+    line-height:1.7;
+  }
+  .bubble{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    padding: 9px 14px;
+    margin: 5px 4px;
+    border-radius: 10px;
+    max-width: 78%;
+    font-size: 14.5px;
+    line-height: 1.55;
+  }
+  .bubble.you{
+    align-self:flex-start;
+    background: #14201A;
+    border: 1px solid #234531;
+    margin-right:auto;
+  }
+  .bubble.assistant{
+    align-self:flex-end;
+    background: #10202A;
+    border: 1px solid #1E3A47;
+    margin-left:auto;
+  }
+  .bubble .who{
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+  }
+  .bubble.you .who{ color: var(--green); }
+  .bubble.assistant .who{ color: var(--cyan); }
+  .bubble.pending{ opacity:.62; }
+  .log-flow{ display:flex; flex-direction:column; }
+  .sys-line{
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    text-align:center;
+    padding: 6px 4px;
+  }
+  .sys-line.err{ color: var(--red); }
+
+  /* ---------- controls ---------- */
+  .controls{
+    margin-top: 16px;
+    background: var(--panel);
+    border: 1px solid var(--line-solid);
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .row{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  .row + .row{ margin-top:10px; }
+  input[type=text], textarea{
+    background: #0D1017;
+    border: 1px solid var(--line-solid);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    outline:none;
+  }
+  input[type=text]:focus, textarea:focus{ border-color:#374254; }
+  #wsUrl{ flex:1; min-width: 220px; }
+  textarea{
+    width:100%;
+    resize: vertical;
+    min-height: 56px;
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height:1.5;
+  }
+  button{
+    font-family: var(--sans);
+    font-size: 13.5px;
+    font-weight:600;
+    border-radius: 8px;
+    padding: 9px 16px;
+    border: 1px solid transparent;
+    cursor:pointer;
+    transition: filter .15s, opacity .15s;
+  }
+  button:active{ filter:brightness(.9); }
+  button:disabled{ opacity:.4; cursor:not-allowed; }
+  .btn-primary{ background: var(--cyan); color:#08131A; }
+  .btn-primary.stop{ background: var(--red); color:#1A0808; }
+  .btn-ghost{ background: transparent; border-color: var(--line-solid); color: var(--text); }
+  .btn-ghost.active{ border-color: var(--amber); color: var(--amber); }
+  .btn-ghost.muted{ border-color: var(--red); color: var(--red); }
+  .advanced-toggle{
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    background:none;
+    border:none;
+    padding: 4px 2px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .advanced{ display:none; margin-top:10px; }
+  .advanced.open{ display:block; }
+  .field-label{
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing:.06em;
+    margin-bottom:5px;
+    text-transform:uppercase;
+  }
+
+  ::-webkit-scrollbar{ width:9px; }
+  ::-webkit-scrollbar-thumb{ background:#232833; border-radius:6px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="eyebrow">Local Speech-to-Speech · GPU Pipeline</div>
+    <h1>Realtime 語音主控台</h1>
+  </div>
+  <div class="status-row">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">未連線</span>
+  </div>
+</header>
+
+<main>
+  <div class="scope-wrap">
+    <div class="scope-labels">
+      <span class="you">● 你的麥克風</span>
+      <span id="scopeState">閒置</span>
+      <span class="assistant">助理語音 ●</span>
+    </div>
+    <canvas id="scope"></canvas>
+  </div>
+
+  <div class="transcript" id="transcript">
+    <div class="empty-log">尚未連線。設定下方 WebSocket 位址後按「連線」開始對話。</div>
+  </div>
+
+  <div class="controls">
+    <div class="row">
+      <input type="text" id="wsUrl" value="ws://127.0.0.1:8765/v1/realtime" spellcheck="false">
+      <button class="btn-primary" id="connectBtn">連線</button>
+      <button class="btn-ghost" id="muteBtn" disabled>🎤 靜音</button>
+      <button class="btn-ghost" id="dumpBtn" disabled>💾 下載原始音訊</button>
+    </div>
+    <div class="row">
+      <button class="advanced-toggle" id="advToggle">進階設定 ▸</button>
+    </div>
+    <div class="advanced" id="advPanel">
+      <div class="field-label">System Instructions</div>
+      <textarea id="instructions">你是一位語音助理，請使用臺灣繁體中文回答，回答自然簡短，不要使用 Markdown。</textarea>
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const statusDot = $('statusDot'), statusText = $('statusText'), scopeState = $('scopeState');
+  const wsUrlInput = $('wsUrl'), connectBtn = $('connectBtn'), muteBtn = $('muteBtn'), dumpBtn = $('dumpBtn');
+  const advToggle = $('advToggle'), advPanel = $('advPanel'), instructionsEl = $('instructions');
+  const transcriptEl = $('transcript');
+  const canvas = $('scope'); const ctx = canvas.getContext('2d');
+
+  let rawPcmChunks = []; // 原始 24kHz PCM16，未經任何處理，用來 debug pipeline 實際輸出
+
+  const SERVER_INPUT_RATE = 16000;
+  const CHUNK_MS = 30;
+
+  let ws = null;
+  let connected = false;
+  let micStream = null, micCtx = null, micNode = null, micSource = null;
+  let muted = false;
+  let nativeAccum = [];
+  let nativeAccumLen = 0;
+
+  let outCtx = null;
+  let nextStartTime = 0;
+  let activeSources = [];
+
+  let inputLevels = new Array(160).fill(0);
+  let outputLevels = new Array(160).fill(0);
+
+  let currentUserBubble = null;
+  let currentAssistantBubble = null;
+
+  // ---------------- UI helpers ----------------
+
+  function setStatus(mode, text) {
+    statusDot.className = 'dot' + (mode ? ' ' + mode : '');
+    statusText.textContent = text;
+    const map = { listening: '聆聽中', speaking: '回覆中', connected: '待命', connecting: '連線中' };
+    scopeState.textContent = map[mode] || '閒置';
+  }
+
+  function clearEmptyLog() {
+    const e = transcriptEl.querySelector('.empty-log');
+    if (e) e.remove();
+  }
+
+  function addSysLine(text, isErr) {
+    clearEmptyLog();
+    const div = document.createElement('div');
+    div.className = 'sys-line' + (isErr ? ' err' : '');
+    div.textContent = text;
+    transcriptEl.appendChild(div);
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  }
+
+  function addBubble(who, text, pending) {
+    clearEmptyLog();
+    const div = document.createElement('div');
+    div.className = 'bubble ' + who + (pending ? ' pending' : '');
+    const label = document.createElement('div');
+    label.className = 'who';
+    label.textContent = who === 'you' ? '你' : '助理';
+    const body = document.createElement('div');
+    body.textContent = text;
+    div.appendChild(label);
+    div.appendChild(body);
+    transcriptEl.appendChild(div);
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    return div;
+  }
+
+  function updateBubble(bubbleEl, text, pending) {
+    if (!bubbleEl) return;
+    bubbleEl.classList.toggle('pending', !!pending);
+    bubbleEl.lastChild.textContent = text;
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  }
+
+  advToggle.addEventListener('click', () => {
+    const open = advPanel.classList.toggle('open');
+    advToggle.textContent = open ? '進階設定 ▾' : '進階設定 ▸';
+  });
+
+  // ---------------- oscilloscope ----------------
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resizeCanvas);
+
+  function drawScope() {
+    requestAnimationFrame(drawScope);
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (w === 0 || h === 0) return;
+    ctx.clearRect(0, 0, w, h);
+    const midTop = h * 0.28, midBottom = h * 0.72;
+
+    ctx.strokeStyle = '#1B202B';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, midTop); ctx.lineTo(w, midTop); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, midBottom); ctx.lineTo(w, midBottom); ctx.stroke();
+
+    drawTrace(inputLevels, midTop, h * 0.24, '#5FD68A');
+    drawTrace(outputLevels, midBottom, h * 0.24, '#4CC9F0');
+  }
+
+  function drawTrace(levels, baseline, amp, color) {
+    const w = canvas.clientWidth;
+    const step = w / (levels.length - 1);
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.6;
+    for (let i = 0; i < levels.length; i++) {
+      const x = i * step;
+      const v = Math.min(1, levels[i] * 6);
+      const jitter = (i % 2 === 0 ? 1 : -1) * v;
+      const y = baseline - jitter * amp;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  function pushLevel(arr, val) {
+    arr.push(val);
+    if (arr.length > 160) arr.shift();
+  }
+
+  // ---------------- resampling ----------------
+
+  function linearResample(input, inRate, outRate) {
+    if (inRate === outRate) return input;
+    const outLen = Math.round(input.length * outRate / inRate);
+    const out = new Float32Array(outLen);
+    const ratio = inRate / outRate;
+    for (let j = 0; j < outLen; j++) {
+      const srcPos = j * ratio;
+      const i0 = Math.floor(srcPos);
+      const frac = srcPos - i0;
+      const s0 = input[i0] || 0;
+      const s1 = input[i0 + 1] !== undefined ? input[i0 + 1] : s0;
+      out[j] = s0 + (s1 - s0) * frac;
+    }
+    return out;
+  }
+
+  function floatTo16BitPCM(float32) {
+    const out = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return out;
+  }
+
+  function base64FromInt16(int16) {
+    const bytes = new Uint8Array(int16.buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+
+  function rms(float32) {
+    let sum = 0;
+    for (let i = 0; i < float32.length; i++) sum += float32[i] * float32[i];
+    return Math.sqrt(sum / float32.length);
+  }
+
+  // ---------------- mic capture ----------------
+
+  // 用 ScriptProcessorNode 而非 AudioWorklet：
+  // AudioWorklet 需要用 addModule() 載入獨立的 JS module（就算是 blob URL 也一樣），
+  // 在 file:// 底下每個檔案都是獨立的 unique origin，會被瀏覽器擋掉。
+  // ScriptProcessorNode 雖然已標記為 deprecated，但不需要載入外部 module，
+  // 在 file:// 環境下最穩定，相容性也最好。
+  const CAPTURE_BUFFER_SIZE = 2048;
+
+  async function startMic() {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+
+    micCtx = new (window.AudioContext || window.webkitAudioContext)();
+    micSource = micCtx.createMediaStreamSource(micStream);
+    micNode = micCtx.createScriptProcessor(CAPTURE_BUFFER_SIZE, 1, 1);
+
+    const nativeRate = micCtx.sampleRate;
+    const chunkNativeSamples = Math.round(nativeRate * CHUNK_MS / 1000);
+
+    micNode.onaudioprocess = (e) => {
+      const chunk = new Float32Array(e.inputBuffer.getChannelData(0));
+      pushLevel(inputLevels, muted ? 0 : rms(chunk));
+
+      if (muted || !connected) return;
+
+      nativeAccum.push(chunk);
+      nativeAccumLen += chunk.length;
+
+      if (nativeAccumLen >= chunkNativeSamples) {
+        const merged = new Float32Array(nativeAccumLen);
+        let off = 0;
+        for (const c of nativeAccum) { merged.set(c, off); off += c.length; }
+        nativeAccum = []; nativeAccumLen = 0;
+
+        const resampled = linearResample(merged, nativeRate, SERVER_INPUT_RATE);
+        const pcm16 = floatTo16BitPCM(resampled);
+        const b64 = base64FromInt16(pcm16);
+
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 }));
+        }
+      }
+    };
+
+    // Safari/一些瀏覽器要求 ScriptProcessorNode 必須接到 destination 才會觸發 onaudioprocess，
+    // 所以接一個 gain=0 的節點，避免麥克風原音被重播出來造成回音。
+    const silentGain = micCtx.createGain();
+    silentGain.gain.value = 0;
+    micSource.connect(micNode);
+    micNode.connect(silentGain);
+    silentGain.connect(micCtx.destination);
+  }
+
+  function stopMic() {
+    if (micNode) micNode.onaudioprocess = null;
+    if (micNode) micNode.disconnect();
+    if (micSource) micSource.disconnect();
+    if (micStream) micStream.getTracks().forEach(t => t.stop());
+    if (micCtx) micCtx.close();
+    micStream = micCtx = micNode = micSource = null;
+    nativeAccum = []; nativeAccumLen = 0;
+    inputLevels.fill(0);
+  }
+
+  // ---------------- playback ----------------
+
+  function ensureOutCtx() {
+    if (!outCtx) {
+      outCtx = new (window.AudioContext || window.webkitAudioContext)();
+      nextStartTime = outCtx.currentTime;
+    }
+    return outCtx;
+  }
+
+  const PLAYBACK_LEAD = 0.06;   // 佇列空掉時，先緩衝 60ms 再接下一段，吸收網路/推論抖動
+  const FADE_SEC = 0.003;       // 每段頭尾做 3ms 淡入淡出，消除段落拼接處的喀聲
+
+  function playTTSChunk(base64) {
+    const ctxOut = ensureOutCtx();
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const int16 = new Int16Array(bytes.buffer);
+    rawPcmChunks.push(int16.slice()); // 保留原始未處理版本，供下載比對
+
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+    pushLevel(outputLevels, rms(float32));
+
+    // 頭尾淡入淡出，避免每段音訊拼接處因相位不連續產生喀聲/電子感
+    const fadeSamples = Math.min(Math.floor(FADE_SEC * 24000), Math.floor(float32.length / 2));
+    for (let i = 0; i < fadeSamples; i++) {
+      const g = i / fadeSamples;
+      float32[i] *= g;
+      float32[float32.length - 1 - i] *= g;
+    }
+
+    const buffer = ctxOut.createBuffer(1, float32.length, 24000);
+    buffer.copyToChannel(float32, 0);
+
+    const src = ctxOut.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctxOut.destination);
+
+    // 佇列空掉（代表上一段播完後這段才到）時，插入一點緩衝時間再開始，
+    // 避免緊接著硬接造成的空隙聽起來像電子雜訊
+    const queueEmpty = nextStartTime <= ctxOut.currentTime + 0.005;
+    const startAt = queueEmpty ? ctxOut.currentTime + PLAYBACK_LEAD : nextStartTime;
+
+    src.start(startAt);
+    nextStartTime = startAt + buffer.duration;
+
+    activeSources.push(src);
+    src.onended = () => { activeSources = activeSources.filter(s => s !== src); };
+  }
+
+  function interruptPlayback() {
+    for (const s of activeSources) { try { s.stop(); } catch (e) {} }
+    activeSources = [];
+    outputLevels.fill(0);
+    if (outCtx) nextStartTime = outCtx.currentTime;
+  }
+
+  // ---------------- websocket / protocol ----------------
+
+  function connect() {
+    const url = wsUrlInput.value.trim();
+    if (!url) return;
+
+    setStatus('connecting', '連線中…');
+    connectBtn.disabled = true;
+
+    ws = new WebSocket(url);
+
+    ws.onopen = async () => {
+      connected = true;
+      connectBtn.disabled = false;
+      connectBtn.textContent = '中斷連線';
+      connectBtn.classList.add('stop');
+      muteBtn.disabled = false;
+      dumpBtn.disabled = false;
+      rawPcmChunks = [];
+      wsUrlInput.disabled = true;
+      setStatus('connected', '已連線');
+      addSysLine('已建立 WebSocket 連線');
+
+      ws.send(JSON.stringify({
+        type: 'session.update',
+        session: {
+          type: 'realtime',
+          instructions: instructionsEl.value,
+          turn_detection: { type: 'server_vad', interrupt_response: true }
+        }
+      }));
+
+      try {
+        await startMic();
+      } catch (err) {
+        addSysLine('無法取得麥克風權限：' + err.message, true);
+      }
+    };
+
+    ws.onmessage = (evt) => {
+      let event;
+      try { event = JSON.parse(evt.data); } catch { return; }
+      handleEvent(event);
+    };
+
+    ws.onerror = () => {
+      setStatus('error', '連線錯誤');
+    };
+
+    ws.onclose = () => {
+      connected = false;
+      connectBtn.disabled = false;
+      connectBtn.textContent = '連線';
+      connectBtn.classList.remove('stop');
+      muteBtn.disabled = true;
+      dumpBtn.disabled = true;
+      wsUrlInput.disabled = false;
+      setStatus(null, '未連線');
+      addSysLine('連線已關閉');
+      stopMic();
+      interruptPlayback();
+      currentUserBubble = null;
+      currentAssistantBubble = null;
+    };
+  }
+
+  function disconnect() {
+    if (ws) ws.close();
+  }
+
+  function handleEvent(event) {
+    const t = event.type || '';
+
+    switch (t) {
+      case 'session.created':
+        addSysLine('伺服器已就緒');
+        break;
+
+      case 'input_audio_buffer.speech_started':
+        setStatus('listening', '聆聽中');
+        interruptPlayback();
+        currentUserBubble = addBubble('you', '…', true);
+        break;
+
+      case 'input_audio_buffer.speech_stopped':
+        setStatus('connected', '待命');
+        break;
+
+      case 'conversation.item.input_audio_transcription.completed':
+        if (currentUserBubble) {
+          updateBubble(currentUserBubble, event.transcript || '', false);
+        } else {
+          addBubble('you', event.transcript || '', false);
+        }
+        currentUserBubble = null;
+        break;
+
+      case 'response.output_audio_transcript.delta':
+        if (!currentAssistantBubble) currentAssistantBubble = addBubble('assistant', '', true);
+        currentAssistantBubble.lastChild.textContent += (event.delta || '');
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+        setStatus('speaking', '回覆中');
+        break;
+
+      case 'response.output_audio_transcript.done':
+        if (currentAssistantBubble) {
+          updateBubble(currentAssistantBubble, event.transcript || '', false);
+        } else {
+          addBubble('assistant', event.transcript || '', false);
+        }
+        currentAssistantBubble = null;
+        break;
+
+      case 'response.output_audio.delta':
+        if (event.delta) playTTSChunk(event.delta);
+        setStatus('speaking', '回覆中');
+        break;
+
+      case 'response.done':
+        setStatus('connected', '待命');
+        currentAssistantBubble = null;
+        break;
+
+      case 'error':
+        addSysLine('伺服器錯誤：' + (event.error?.message || JSON.stringify(event)), true);
+        break;
+
+      default:
+        // 其他事件類型不顯示於畫面，避免干擾對話紀錄
+        break;
+    }
+  }
+
+  function exportRawWav() {
+    if (rawPcmChunks.length === 0) {
+      addSysLine('目前沒有可下載的音訊，先讓助理說一句話再試');
+      return;
+    }
+    let total = 0;
+    for (const c of rawPcmChunks) total += c.length;
+    const merged = new Int16Array(total);
+    let off = 0;
+    for (const c of rawPcmChunks) { merged.set(c, off); off += c.length; }
+
+    const sampleRate = 24000; // pipeline 原始輸出的 TTS sample rate
+    const bytesPerSample = 2;
+    const blockAlign = bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = merged.length * bytesPerSample;
+
+    const buf = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buf);
+    const writeStr = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);   // PCM
+    view.setUint16(22, 1, true);   // mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);  // bits per sample
+    writeStr(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    let pos = 44;
+    for (let i = 0; i < merged.length; i++, pos += 2) view.setInt16(pos, merged[i], true);
+
+    const blob = new Blob([buf], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pipeline_raw_${Date.now()}.wav`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  dumpBtn.addEventListener('click', exportRawWav);
+
+  // ---------------- controls ----------------
+
+  connectBtn.addEventListener('click', () => {
+    if (connected) disconnect(); else connect();
+  });
+
+  muteBtn.addEventListener('click', () => {
+    muted = !muted;
+    muteBtn.classList.toggle('muted', muted);
+    muteBtn.textContent = muted ? '🔇 已靜音' : '🎤 靜音';
+  });
+
+  resizeCanvas();
+  drawScope();
+})();
+</script>
+</body>
+</html>
