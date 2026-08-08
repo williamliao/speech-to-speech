@@ -15,7 +15,8 @@ __pycache__/
 .venv/
 venv/
 
+# Local environment
+.env
+
 # Local-only replica deploy script (never tracked)
 deploy_replica.py
-
-.env
