@@ -541,7 +541,8 @@
 
   function ensureOutCtx() {
     if (!outCtx) {
-      outCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // 強制設定 AudioContext 的 sampleRate
+      outCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
       nextStartTime = outCtx.currentTime;
     }
     return outCtx;
@@ -570,7 +571,7 @@
       float32[float32.length - 1 - i] *= g;
     }
 
-    const buffer = ctxOut.createBuffer(1, float32.length, 24000);
+    const buffer = ctxOut.createBuffer(1, float32.length, 16000);
     buffer.copyToChannel(float32, 0);
 
     const src = ctxOut.createBufferSource();
@@ -740,7 +741,7 @@
     let off = 0;
     for (const c of rawPcmChunks) { merged.set(c, off); off += c.length; }
 
-    const sampleRate = 24000; // pipeline 原始輸出的 TTS sample rate
+    const sampleRate = 16000; // pipeline 原始輸出的 TTS sample rate
     const bytesPerSample = 2;
     const blockAlign = bytesPerSample;
     const byteRate = sampleRate * blockAlign;
