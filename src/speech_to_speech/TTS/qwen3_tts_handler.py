@@ -66,6 +66,10 @@ CJK_CHARACTER_PATTERN = re.compile(
     r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
     r"\U00020000-\U0002fa1f]"
 )
+TTS_COALESCE_SENTENCE_END_CHARS = set("。！？；，,.!?;\n")
+TTS_COALESCE_MAX_WAIT_S = 1.5
+TTS_COALESCE_POLL_INTERVAL_S = 0.05
+TTS_COALESCE_MAX_CHARS = 200
 QWEN3_LANGUAGE_ALIASES = {
     "zh": "chinese",
     "zh-cn": "chinese",
@@ -749,15 +753,18 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
             f"Qwen3-TTS generated {audio_duration:.2f}s audio in {generation_time:.2f}s (RTF: {rtf:.2f}, {label})"
         )
 
-    def _coalesce_pending_tts_input(self, current_input: TTSInput) -> tuple[str, Optional[str]]:
-        """Combine already-queued text chunks before the next TTS synthesis call."""
-        if not hasattr(self.queue_in, "mutex") or not hasattr(self.queue_in, "queue"):
-            return current_input.text, current_input.language_code
+    def _drain_ready_tts_queue(
+        self,
+        current_input: TTSInput,
+        parts: list[str],
+        language_code: Optional[str],
+    ) -> tuple[Optional[str], bool]:
+        """Drain already-queued compatible TTS text without blocking.
 
-        text = current_input.text
-        language_code = current_input.language_code
-
-        parts = [text.strip()] if text and text.strip() else []
+        Keeps upstream response/turn ordering guarantees while allowing consecutive
+        text chunks from the same response to be synthesized as one utterance.
+        """
+        saw_end_of_response = False
         text_events: list[AssistantOutputEvent] = []
 
         def same_response(item: TTSInput | AssistantOutputEvent) -> bool:
@@ -771,11 +778,13 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         with self.queue_in.mutex:
             while self.queue_in.queue:
                 next_item = self.queue_in.queue[0]
+
                 if is_control_message(next_item, SESSION_END.kind):
                     break
                 if isinstance(next_item, bytes) and next_item == PIPELINE_END:
                     break
                 if isinstance(next_item, EndOfResponse):
+                    saw_end_of_response = True
                     break
                 if isinstance(next_item, AssistantOutputEvent):
                     if not same_response(next_item) or any(
@@ -801,11 +810,72 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
                 if language_code is None:
                     language_code = next_item.language_code
 
-        # These events preceded the inputs absorbed above. Forward them before
-        # synthesis so protocol ordering remains text -> audio while Qwen still
-        # gets to combine consecutive text chunks.
+        # These text events appeared before the TTS chunks absorbed above.
+        # Preserve protocol ordering: assistant text first, then synthesized audio.
         for event in text_events:
             self.queue_out.put(cast(TTSOut, event))
+
+        return language_code, saw_end_of_response
+
+    def _coalesce_pending_tts_input(self, current_input: TTSInput) -> tuple[str, Optional[str]]:
+        """Combine queued text into a fuller utterance before TTS synthesis.
+
+        Drain text that is already queued first. If the accumulated text does not
+        yet end at a sentence/clause boundary, briefly wait for more LLM output.
+        The wait is bounded by time and character count, and cancellation is checked
+        continuously so barge-in remains responsive.
+        """
+        if not hasattr(self.queue_in, "mutex") or not hasattr(self.queue_in, "queue"):
+            return current_input.text, current_input.language_code
+
+        text = current_input.text
+        language_code = current_input.language_code
+        parts: list[str] = [text.strip()] if text and text.strip() else []
+
+        language_code, saw_end_of_response = self._drain_ready_tts_queue(
+            current_input,
+            parts,
+            language_code,
+        )
+
+        def ends_with_sentence_boundary() -> bool:
+            if not parts:
+                return False
+            last = parts[-1].rstrip()
+            return bool(last) and last[-1] in TTS_COALESCE_SENTENCE_END_CHARS
+
+        def total_chars() -> int:
+            return sum(len(part) for part in parts)
+
+        cancel_gen = self.cancel_scope.generation if self.cancel_scope else None
+        deadline = perf_counter() + TTS_COALESCE_MAX_WAIT_S
+
+        while (
+            not saw_end_of_response
+            and not ends_with_sentence_boundary()
+            and total_chars() < TTS_COALESCE_MAX_CHARS
+        ):
+            if (
+                cancel_gen is not None
+                and self.cancel_scope is not None
+                and self.cancel_scope.is_stale(cancel_gen)
+            ):
+                break
+
+            remaining = deadline - perf_counter()
+            if remaining <= 0:
+                break
+
+            with self.queue_in.not_empty:
+                self.queue_in.not_empty.wait(
+                    timeout=min(remaining, TTS_COALESCE_POLL_INTERVAL_S)
+                )
+
+            language_code, saw_end_of_response = self._drain_ready_tts_queue(
+                current_input,
+                parts,
+                language_code,
+            )
 
         combined_text = " ".join(parts).strip()
         return combined_text, language_code
