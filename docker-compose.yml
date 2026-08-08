@@ -56,7 +56,7 @@ services:
       - --qwen3_tts_model_name
       - Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
       - --qwen3_tts_speaker
-      - Vivian
+      - vivian
       - --qwen3_tts_language
       - Chinese
 
