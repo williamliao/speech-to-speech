@@ -23,8 +23,339 @@ import { ChatView } from "./ui/chat.js";
 import { Account } from "./ui/account.js";
 
 const DEFAULT_VOICE = "Aiden";
-const DEFAULT_INSTRUCTIONS = "You are a friendly voice assistant.";
+const DEFAULT_INSTRUCTIONS =
+  "You are a friendly voice assistant. " +
+  "Keep replies short, warm, and spoken. Avoid long monologues.";
 
+// ── Persona integration ──────────────────────────────────────────────────────
+
+// 如果之後有 Persona Bridge HTTP API，就填在這裡。
+// 例如:
+// const PERSONA_RESPONSE_ENDPOINT = "http://127.0.0.1:18882/persona/response";
+//
+// 現在先留空也沒關係，response text 仍會透過
+// "s2s-assistant-response" CustomEvent 暴露出去。
+const PERSONA_RESPONSE_ENDPOINT = "";
+console.log("[persona] classifier v3 loaded");
+let personaThinkingTimer = 0;
+const SELF_RE = /我|咱|\bi\b|\bi'm\b|\bi am\b|\bmy\b|\bme\b/;
+const USER_RE = /你|妳|\byou\b|\byour\b|\byou're\b/;
+// 對「你」下的祈使 / 提問，代表情緒是對方的，不是 persona 的
+const TO_USER_RE = /你|妳|別|不要|不用|是不是|會不會|要不要|有沒有|聽起來|看起來|感覺你/;
+ let lastPersonaResponseId = "";
+
+function schedulePersonaThinking() {
+  clearTimeout(personaThinkingTimer);
+
+  personaThinkingTimer = window.setTimeout(() => {
+    void playPersonaAnimation("thinking");
+  }, 400);
+}
+
+function cancelPersonaThinking() {
+  clearTimeout(personaThinkingTimer);
+  personaThinkingTimer = 0;
+}
+
+/**
+ * 判斷情緒詞是不是在講 persona 自己。
+ * 比原本只看前 12 字更穩：情緒詞前後都看，而且會先排除「對你說」的句型。
+ */
+function emotionIsAboutSelf(t, emotionRegex) {
+  const re = new RegExp(emotionRegex.source, emotionRegex.flags.includes("g")
+    ? emotionRegex.flags
+    : emotionRegex.flags + "g");
+ 
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    const i = m.index;
+    const before = t.slice(Math.max(0, i - 14), i);
+    const after = t.slice(i + m[0].length, i + m[0].length + 8);
+ 
+    // 「被你誇獎」的「你」是施事者，情緒仍屬於 persona，先中和掉。
+    const guard = before.replace(/被(你|妳)/g, "被");
+ 
+    // 最近的代名詞決定情緒歸屬：
+    // 「那你說得我有點不好意思」→ 我 比 你 更靠近情緒詞 → 是自己的
+    // 「你別難過」→ 只有你 → 是對方的
+    const lastSelf = Math.max(guard.lastIndexOf("我"), guard.lastIndexOf("咱"));
+    const lastUser = Math.max(guard.lastIndexOf("你"), guard.lastIndexOf("妳"));
+    if (lastSelf >= 0 && lastSelf > lastUser) return true;
+    if (lastUser > lastSelf) continue;
+ 
+    // 沒有中文代名詞時，退回英文自稱 + 後方視窗
+    if (SELF_RE.test(guard) || SELF_RE.test(after)) return true;
+    // 「別太難過」這類祈使句是對對方說的
+    if (TO_USER_RE.test(guard.slice(-8))) continue;
+  }
+  return false;
+}
+
+/** 整句是在問對方的狀態嗎？（問句時不要把情緒詞當成 persona 自己的） */
+function isQuestionAboutUser(t) {
+  // 只認強問句標記；「呢 / 吧」太弱（「我還真的有點擔心你呢」不是問句）
+  return USER_RE.test(t) && /嗎|是不是|會不會|要不要|有沒有|如何|怎麼樣/.test(t);
+}
+
+const R = {
+  // 只留「不靠標點也成立」的驚訝詞。刻意不放單獨的「哇」「什麼」，
+  // 否則「今天有什麼想聊的嗎」會被誤判。
+  surprised:
+    /真的假的|不會吧|哇塞|哇嗚|哇喔|天啊|我的天|居然|竟然|嚇一跳|嚇到我|太意外|沒想到|驚訝|震驚|whoa|wow|oh my god|omg|no way|surpris|shock|unexpected/,
+  // 弱驚訝：只是語助詞，優先權放到最低，否則會蓋掉後面真正的情緒
+  // （「真的嗎聽你這樣說我現在變得更開心了」應該是 happy）
+  surprisedWeak: /真的嗎|真的喔|是喔|是嗎|原來/,
+  // 補上「被誇獎」這一類：這是 persona 最常見卻抓不到的害羞情境
+  embarrassed:
+    /害羞|窩瑟|不好意思|才沒有|才不是|笨蛋|討厭啦|臉紅|羞死|好丟臉|別靠這麼近|你靠太近|不准看|embarrass|blush|shy|flustered|bashful|dummy|too close|stop teasing/,
+  // 「被誇獎」只有在沒有明講開心時才算害羞；
+  // 「被稱讚的時候我確實會覺得很開心」→ 那就是 happy，不是害羞
+  praise: /誇獎|稱讚|讚美|被你這樣說|心裡.{0,3}暖|暖暖的/,
+  angry:
+    /生氣|火大|可惡|氣死|不爽|煩死|夠了|真過分|太過分|angry|mad|annoyed|irritated|frustrated|how dare/,
+  sad:
+    /難過|傷心|寂寞|孤單|失落|想哭|心痛|捨不得|不開心|sad|lonely|heartbroken|upset|disappointed/,
+  sleepy:
+    /好睏|睏了|想睡|累了|好累|疲倦|沒精神|打哈欠|sleepy|tired|drowsy|yawn/,
+  goodbye:
+    /再見|掰掰|拜拜|下次見|待會見|晚點見|明天見|先走了|保重|bye|goodbye|see you|see ya|take care|talk to you later/,
+  greeting:
+    /你好|^嗨|哈囉|早安|午安|晚安|歡迎|很高興見到你|見到你真好|你來啦|你回來啦|hello|\bhi\b|\bhey\b|good morning|good afternoon|good evening|welcome|nice to see you/,
+  // persona 自己的正向情緒,走 emotionIsAboutSelf,不受問句守衛限制
+  // (persona 幾乎每句都以問句收尾,用問句擋掉會漏一大半)
+  happySelf:
+    /開心|快樂|高興|愉快|心情很好|心情超好|心情很棒|心情不錯|放心了|很有動力|喜歡你|愛你|happy|glad|love you/,
+  // 純反應詞,沒有主詞,才需要問句守衛
+  happyReaction:
+    /太好了|太棒了|真棒|好耶|恭喜|好笑|有趣|逗我|哈哈|嘿嘿|awesome|wonderful|fantastic|funny|haha|hehe/,
+  // v2 漏掉的分支：狀態機的 thinking 只在 processing 觸發，語意上的思考沒人接
+  thinking:
+    /讓我想想|我想想|我在想|想一下|讓我看看|我猜|不太確定|我不確定|嗯讓我|沒聽清楚|沒聽懂|沒有聽清|再說一遍|再說一次|hmm|let me think|let me see|not sure|i guess|say that again/,
+  relax:
+    /放鬆|舒服|悠閒|安心多了|很安心|relaxed|comfortable|comfy|peaceful|calm/,
+  // 安慰 / 陪伴：意圖導向，不需要 self-reference。原本這類句子全部掉到 none。
+  comfort:
+    /喝點溫水|先喝點|多喝點|緩緩|舒緩|放慢|休息一下|坐下來休息|找個舒服|辛苦了|沒關係啦|沒關係的|別太|不要太|別擔心|不要擔心|慢慢來|好好休息|放輕鬆|深呼吸|陪著你|我會陪你|一直陪|苦求自己|苛求自己|別逼自己/,
+};
+
+async function setPersonaState(activity) {
+  try {
+    const res = await fetch(PERSONA_EVENTS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "state",
+        state: {
+          phase: "active",
+          activity,
+          microphoneMuted: false,
+          outputMuted: false,
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      console.warn(
+        `[persona] state "${activity}" failed: HTTP ${res.status}`,
+      );
+      return;
+    }
+
+    console.log(`[persona] state: ${activity}`);
+  } catch (err) {
+    console.warn(
+      `[persona] failed to set state "${activity}":`,
+      err,
+    );
+  }
+}
+
+/**
+ * Forward the completed assistant response to Persona integration.
+ *
+ * Only completed responses are forwarded. Cancelled / interrupted responses
+ * are intentionally ignored so Persona does not trigger an animation after
+ * the user barges in.
+ *
+ * @param {{
+ *   responseId: string;
+ *   status: string;
+ *   audible?: boolean;
+ *   transcript?: string;
+ * }} detail
+ */
+async function forwardAssistantResponse(detail) {
+  const text = detail.transcript?.trim();
+
+  if (detail.status !== "completed") {
+    if (DEBUG) {
+      console.debug(
+        `[persona] skip response ${detail.responseId}: status=${detail.status}`,
+      );
+    }
+
+    return;
+  }
+
+  if (!text) {
+    return;
+  }
+
+  console.log(
+    "[persona] assistant response:",
+    text,
+  );
+
+  const animation =
+    classifyPersonaAnimation(text);
+
+  console.log(
+    "[persona] classified animation:",
+    animation,
+  );
+
+  if (!detail.responseId || detail.responseId !== lastPersonaResponseId) {
+    lastPersonaResponseId = detail.responseId || "";
+    if (animation !== "none") void playPersonaAnimation(animation);
+  }
+
+  const payload = {
+    text,
+    responseId: detail.responseId,
+    audible: detail.audible ?? false,
+  };
+
+  window.dispatchEvent(
+    new CustomEvent(
+      "s2s-assistant-response",
+      {
+        detail: payload,
+      },
+    ),
+  );
+}
+const PERSONA_EVENTS_URL = "/api/persona";
+
+/**
+ * Classify an assistant response into a Persona animation.
+ *
+ * Priority matters:
+ * surprised / embarrassed / angry etc. should beat generic happy words.
+ *
+ * @param {string} text
+ * @returns {
+ *   "greeting" |
+ *   "happy" |
+ *   "embarrassed" |
+ *   "angry" |
+ *   "sad" |
+ *   "thinking" |
+ *   "surprised" |
+ *   "goodbye" |
+ *   "relax" |
+ *   "sleepy" |
+ *   "none"
+ * }
+ */
+export function classifyPersonaAnimation(text) {
+  const t = String(text || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!t) return "none";
+ 
+  const askingUser = isQuestionAboutUser(t);
+  const selfHappy = emotionIsAboutSelf(t, R.happySelf);
+ 
+  if (R.surprised.test(t)) return "surprised";
+  if (emotionIsAboutSelf(t, R.embarrassed) || (!askingUser && /害羞|不好意思|臉紅|blush|shy/.test(t)))
+    return "embarrassed";
+  if (!selfHappy && emotionIsAboutSelf(t, R.praise)) return "embarrassed";
+  if (emotionIsAboutSelf(t, R.angry)) return "angry";
+  if (emotionIsAboutSelf(t, R.sad)) return "sad";
+  if (emotionIsAboutSelf(t, R.sleepy)) return "sleepy";
+  if (R.goodbye.test(t)) return "goodbye";
+  if (R.greeting.test(t)) return "greeting";
+  if (selfHappy) return "happy";
+  if (!askingUser && R.happyReaction.test(t)) return "happy";
+  if (R.thinking.test(t)) return "thinking";
+  if (emotionIsAboutSelf(t, R.relax)) return "relax";
+  if (R.comfort.test(t)) return "relax";
+  if (R.surprisedWeak.test(t)) return "surprised";
+ 
+  return "none";
+}
+let lastPersonaAnimation = "";
+let lastPersonaAnimationAt = 0;
+
+const PERSONA_ANIMATION_COOLDOWN_MS = 5000;
+/** @type {Record<string, number>} */
+const PERSONA_COOLDOWN_OVERRIDE = { thinking: 1200 };
+
+/**
+ * Play one Persona configured animation.
+ *
+ * @param {string} animationName
+ */
+async function playPersonaAnimation(animationName) {
+  if (!animationName || animationName === "none") {
+    return;
+  }
+
+  const now = Date.now();
+
+  const cooldown = PERSONA_COOLDOWN_OVERRIDE[animationName] ?? PERSONA_ANIMATION_COOLDOWN_MS;
+
+  if (animationName === lastPersonaAnimation && now - lastPersonaAnimationAt < cooldown) {
+    console.log(
+      `[persona] skip repeated animation: ${animationName}`,
+    );
+
+    return;
+  }
+
+  try {
+    const res = await fetch(PERSONA_EVENTS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify({
+        type: "animation",
+        animation_name: animationName,
+      }),
+    });
+
+    if (!res.ok) {
+      console.warn(
+        `[persona] animation "${animationName}" failed: HTTP ${res.status}`,
+      );
+
+      return;
+    }
+
+    lastPersonaAnimation = animationName;
+    lastPersonaAnimationAt = now;
+
+    console.log(
+      `[persona] animation: ${animationName}`,
+    );
+  } catch (err) {
+    console.warn(
+      `[persona] failed to play animation "${animationName}":`,
+      err,
+    );
+  }
+}
+
+// Appended to the user's instructions whenever at least one tool is enabled.
+// Stops the model from announcing capabilities ("Yes, I can search") and then
+// idling for the next turn — it should act immediately in the same response.
+const TOOL_USE_HINT =
+  " When the user's request calls for one of your tools, do not describe your " +
+  "capabilities or say you can do it and wait for another turn. Instead, say " +
+  'a brief acknowledgement like "Let me search for that..." and call the tool ' +
+  "right away in the same response.";
 const STORAGE_KEYS = {
   // Direct s2s server URL, used only when the deploy has no LOAD_BALANCER_URL
   // (in LB mode the browser never learns the LB address — it POSTs /api/session).
@@ -1455,13 +1786,69 @@ async function doStart(audioContext = null) {
   });
 
   c.addEventListener("status", (e) => {
-    const detail = /** @type {CustomEvent<{ status: string }>} */ (e).detail;
+    const detail =
+      /** @type {CustomEvent<{ status: string }>} */ (e).detail;
+
     onClientStatus(detail.status);
-    if (detail.status === "ai-speaking") chat.onAssistantActivity();
+
+    switch (detail.status) {
+      case "ai-speaking":
+        cancelPersonaThinking();
+        chat.onAssistantActivity();
+        void setPersonaState("speaking");
+        break;
+
+      case "connected":
+      case "user-speaking":
+        cancelPersonaThinking();
+        void setPersonaState("listening");
+        break;
+
+      case "processing":
+        void setPersonaState("idle");
+        schedulePersonaThinking();
+        break;
+
+      case "closed":
+        cancelPersonaThinking();
+        void setPersonaState("idle");
+        break;
+    }
   });
+
   c.addEventListener("transcript", (e) => {
-    const d = /** @type {CustomEvent<{ role: "user" | "assistant"; text: string; partial: boolean; itemId?: string; responseId?: string }>} */ (e).detail;
+    const d = /** @type {CustomEvent<{
+      role: "user" | "assistant";
+      text: string;
+      partial: boolean;
+      itemId?: string;
+      responseId?: string
+    }>} */ (e).detail;
+
     chat.onTranscript(d);
+
+    // 等 assistant 的 final transcript，
+    // 但不要等整個 response / audio 結束。
+    if (
+      d.role === "assistant" &&
+      !d.partial &&
+      d.text?.trim() &&
+      d.responseId !== lastPersonaResponseId
+    ) {
+      lastPersonaResponseId = d.responseId || "";
+
+      const animation =
+        classifyPersonaAnimation(d.text);
+
+      console.log(
+        "[persona] early classified animation:",
+        animation,
+      );
+
+      if (animation !== "none") {
+        void playPersonaAnimation(animation);
+      }
+    }
   });
   c.addEventListener("user-turn-started", (e) => {
     const detail = /** @type {CustomEvent<{ itemId?: string }>} */ (e).detail;
@@ -1478,8 +1865,14 @@ async function doStart(audioContext = null) {
 
   c.addEventListener("response-finished", (e) => {
     const detail = /** @type {CustomEvent<{ responseId: string; status: string; audible?: boolean; transcript?: string }>} */ (e).detail;
+
+    // 原本的 UI / chat 流程
     chat.onResponseFinished(detail);
+
+    // Persona integration
+    void forwardAssistantResponse(detail);
   });
+
   c.addEventListener("error", (e) => {
     const detail = /** @type {CustomEvent<{ error: unknown }>} */ (e).detail;
     void onFatalError(detail.error);
