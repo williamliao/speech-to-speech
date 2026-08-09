@@ -648,6 +648,25 @@ async def session_end(request: Request):
         await asyncio.to_thread(limiter.end, sid)
     return {"ok": True}
 
+@app.post("/api/persona")
+async def persona_event(request: Request):
+    payload = await request.json()
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://127.0.0.1:47831/events",
+            json=payload,
+            timeout=5.0,
+        )
+
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        media_type=response.headers.get(
+            "content-type",
+            "application/json",
+        ),
+    )
 
 # Static front-end. Registered last so the /api routes win. `html=True` serves
 # index.html at "/". The repo is public anyway, so serving the dir is fine.
