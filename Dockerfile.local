@@ -1,0 +1,40 @@
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV UV_LINK_MODE=copy
+ENV UV_TORCH_BACKEND=cu128
+ENV PATH="/usr/src/app/.venv/bin:/root/.local/bin:${PATH}"
+
+WORKDIR /usr/src/app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    build-essential \
+    cmake \
+    ffmpeg \
+    libsndfile1 \
+    portaudio19-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN uv --version
+RUN uv python install 3.11
+
+COPY pyproject.toml ./
+
+RUN uv venv --python 3.11 && \
+    uv sync \
+      --no-install-project \
+      --no-dev
+
+COPY . .
+
+RUN uv sync --no-dev
+
+RUN uv pip install faster-whisper
+
+CMD ["speech-to-speech"]
