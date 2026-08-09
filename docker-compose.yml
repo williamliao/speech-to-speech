@@ -1,9 +1,40 @@
+---
 services:
+
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    command:
+      - -hf
+      - ggml-org/gemma-4-E4B-it-GGUF
+      - -np
+      - "2"
+      - -c
+      - "65536"
+      - -fa
+      - "on"
+      - --swa-full
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    ports:
+      - 8080:8080/tcp
+    volumes:
+      - ./cache/:/root/.cache/
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+
   pipeline:
+    depends_on:
+      - llama
     build:
       context: .
       dockerfile: ${DOCKERFILE:-Dockerfile}
-
     command:
       - speech-to-speech
       - serve
@@ -11,80 +42,28 @@ services:
       - 0.0.0.0
       - --port
       - "8765"
-
-      # STT：Faster Whisper
-      - --stt
-      - faster-whisper
-      - --faster_whisper_stt_model_name
-      - large-v3
-      - --faster_whisper_stt_device
-      - cuda
-      - --faster_whisper_stt_compute_type
-      - float16
-      - --faster_whisper_stt_gen_language
-      - zh
-      - --faster_whisper_stt_gen_task
-      - transcribe
-      - --language
-      - zh
-
-      # VAD / latency tuning
-      - --no_enable_live_transcription
-      - --min_silence_ms
-      - "200"
-      - --speculative_reopen_ms
-      - "200"
-      - --unanswered_reopen_ms
-      - "500"
-
-      # LLM：連到 Windows 主機上的 llama-server
       - --llm_backend
-      - chat-completions
+      - responses-api
       - --model_name
-      - Gemma-4-31B-NVFP4
+      - ggml-org/gemma-4-E4B-it-GGUF
       - --responses_api_base_url
-      - http://host.docker.internal:18010/v1
+      - http://llama:8080/v1
       - --responses_api_api_key
-      - not-needed
-      - --responses_api_stream
-
-      # TTS：Qwen3-TTS（torch backend）
-      - --tts
-      - qwen3
-      - --qwen3_tts_backend
-      - torch
-      - --qwen3_tts_model_name
-      - Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
-      - --qwen3_tts_speaker
-      - vivian
-      - --qwen3_tts_language
-      - Chinese
-
-      # 系統提示
+      - ""
       - --init_chat_role
       - system
       - --init_chat_prompt
-      - 請使用臺灣繁體中文回答。回答自然、簡潔，不要使用簡體中文，也不要使用 Markdown 格式。
-
-    environment:
-      # 主機 GPU 1 = RTX 5060 Ti；容器裡重新映射成 cuda:0
-      CUDA_VISIBLE_DEVICES: "1"
-      HF_HOME: /root/.cache/huggingface
-
+      - "You are a helpful assistant"
+    expose:
+      - 8765/tcp
     ports:
-      - "8765:8765"
-      - "12345:12345"
-      - "12346:12346"
-
+      - 8765:8765/tcp
     volumes:
-      - ./cache:/root/.cache
-
+      - ./cache/:/root/.cache/
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["1"]
+              device_ids: ['0']
               capabilities: [gpu]
-
-    restart: "no"
