@@ -1,0 +1,93 @@
+services:
+  pipeline:
+    build:
+      context: .
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+
+    command:
+      - speech-to-speech
+
+      # Realtime WebSocket 模式
+      - --mode
+      - realtime
+
+      # STT：Faster Whisper
+      - --stt
+      - faster-whisper
+      - --faster_whisper_stt_model_name
+      - large-v3
+      - --faster_whisper_stt_device
+      - cuda
+      - --faster_whisper_stt_compute_type
+      - float16
+      - --faster_whisper_stt_gen_language
+      - zh
+      - --faster_whisper_stt_gen_task
+      - transcribe
+      - --language
+      - zh
+
+      # 降低 VAD／重開等待
+      # VAD / latency tuning
+      - --no_enable_live_transcription
+      - --min_silence_ms
+      - "200"
+      - --speculative_reopen_ms
+      - "200"
+      - --unanswered_reopen_ms
+      - "500"
+
+      # LLM：連到 Windows 主機上的 llama-server
+      - --llm_backend
+      - chat-completions
+      - --model_name
+      - Gemma-4-31B-NVFP4
+      - --responses_api_base_url
+      - http://host.docker.internal:18010/v1
+      - --responses_api_api_key
+      - not-needed
+      - --responses_api_stream
+
+      # TTS：Qwen3-TTS GGML
+      - --tts
+      - qwen3
+      - --qwen3_tts_backend
+      - torch
+      - --qwen3_tts_model_name
+      - Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
+      - --qwen3_tts_speaker
+      - vivian
+      - --qwen3_tts_language
+      - Chinese
+
+      # 系統提示
+      - --init_chat_role
+      - system
+      - --init_chat_prompt
+      - 請使用臺灣繁體中文回答。回答自然、簡潔，不要使用簡體中文，也不要使用 Markdown 格式。
+
+    environment:
+      # 主機 GPU 1 = RTX 5060 Ti
+      # 容器裡會重新映射成 cuda:0
+      CUDA_VISIBLE_DEVICES: "1"
+
+      # Hugging Face cache 位置
+      HF_HOME: /root/.cache/huggingface
+
+    ports:
+      - "8765:8765"
+      - "12345:12345"
+      - "12346:12346"
+
+    volumes:
+      - ./cache:/root/.cache
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+
+    restart: "no"
