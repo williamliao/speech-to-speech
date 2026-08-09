@@ -29,12 +29,11 @@ COPY pyproject.toml ./
 RUN uv venv --python 3.11 && \
     uv sync \
       --no-install-project \
-      --no-dev
+      --no-dev \
+      --extra faster-whisper
 
 COPY . .
 
-RUN uv sync --no-dev
-
-RUN uv pip install faster-whisper
+RUN uv sync --no-dev --extra faster-whisper
 
 CMD ["speech-to-speech"]
