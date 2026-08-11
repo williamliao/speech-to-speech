@@ -688,3 +688,30 @@ If you use this pipeline, please also cite the component models you run. The def
 ```
 
 Citations for optional backends such as Kokoro, Pocket TTS, ChatTTS, Whisper variants, Paraformer, and MMS live in the respective [component READMEs](./src/speech_to_speech).
+
+## Personal fork notes
+
+This repository is my personal fork of Hugging Face's `speech-to-speech`.
+
+Main development branch:
+
+- `main` — tracks upstream
+- `my-patches` — my local/self-hosted modifications
+
+### Changes in `my-patches`
+
+- Buffer Qwen3-TTS input until sentence/clause boundaries to improve prosody
+- Add self-hosted realtime demo/debug clients
+- Add Persona desktop character integration
+- Custom Docker / Docker Compose configuration
+- Local deployment adjustments
+
+### Updating from upstream
+
+```bash
+git fetch upstream
+git switch my-patches
+git rebase upstream/main
+git push --force-with-lease origin my-patches
+
+```
