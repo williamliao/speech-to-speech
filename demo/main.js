@@ -107,7 +107,7 @@ const R = {
   surprisedWeak: /真的嗎|真的喔|是喔|是嗎|原來/,
   // 補上「被誇獎」這一類：這是 persona 最常見卻抓不到的害羞情境
   embarrassed:
-    /害羞|窩瑟|不好意思|才沒有|才不是|笨蛋|討厭啦|臉紅|羞死|好丟臉|別靠這麼近|你靠太近|不准看|embarrass|blush|shy|flustered|bashful|dummy|too close|stop teasing/,
+    /害羞|窩瑟|不好意思|才沒有|才不是|笨蛋|討厭啦|臉紅|羞死|好丟臉|別靠這麼近|你靠太近|不准看|亂講什麼|亂說什麼|你在亂講|你在亂說|別亂講|別亂說|這種話.{0,8}(不用|不要|不需要).{0,6}說|幹嘛突然說這種話|embarrass|blush|shy|flustered|bashful|dummy|too close|stop teasing/,
   // 「被誇獎」只有在沒有明講開心時才算害羞；
   // 「被稱讚的時候我確實會覺得很開心」→ 那就是 happy，不是害羞
   praise: /誇獎|稱讚|讚美|被你這樣說|心裡.{0,3}暖|暖暖的/,
@@ -118,9 +118,9 @@ const R = {
   sleepy:
     /好睏|睏了|想睡|累了|好累|疲倦|沒精神|打哈欠|sleepy|tired|drowsy|yawn/,
   goodbye:
-    /再見|掰掰|拜拜|下次見|待會見|晚點見|明天見|先走了|保重|bye|goodbye|see you|see ya|take care|talk to you later/,
+    /再見|掰掰|拜拜|晚安|明天見|下次見|待會見|晚點見|先走了|保重|bye|goodbye|good night|see you|see ya|take care|talk to you later/,
   greeting:
-    /你好|^嗨|哈囉|早安|午安|晚安|歡迎|很高興見到你|見到你真好|你來啦|你回來啦|hello|\bhi\b|\bhey\b|good morning|good afternoon|good evening|welcome|nice to see you/,
+    /你好|^嗨|哈囉|早安|午安|歡迎|歡迎回來|很高興見到你|見到你真好|你來啦|你來了|你回來(?:了|啦|囉|喔)?(?:啊|呀|耶)?|回來啦|回來了啊|hello|\bhi\b|\bhey\b|good morning|good afternoon|good evening|welcome|nice to see you/,
   // persona 自己的正向情緒,走 emotionIsAboutSelf,不受問句守衛限制
   // (persona 幾乎每句都以問句收尾,用問句擋掉會漏一大半)
   happySelf:
@@ -135,7 +135,13 @@ const R = {
     /放鬆|舒服|悠閒|安心多了|很安心|relaxed|comfortable|comfy|peaceful|calm/,
   // 安慰 / 陪伴：意圖導向，不需要 self-reference。原本這類句子全部掉到 none。
   comfort:
-    /喝點溫水|先喝點|多喝點|緩緩|舒緩|放慢|休息一下|坐下來休息|找個舒服|辛苦了|沒關係啦|沒關係的|別太|不要太|別擔心|不要擔心|慢慢來|好好休息|放輕鬆|深呼吸|陪著你|我會陪你|一直陪|苦求自己|苛求自己|別逼自己/,
+    /辛苦了|辛苦你了|真的辛苦|幫你拿水|拿水給你|休息一下|坐下(?:來)?休息|快點坐下|快進來坐|別擔心|不要擔心|慢慢來|好好休息|聽你說|陪你聊|我就在這邊|不會突然消失|陪著你|我會陪你|別硬撐|不要硬撐|快點去睡|早點睡|放輕鬆|深呼吸|別逼自己/,
+  tsundere:
+    /^(哈|蛤|欸|誒)(?:[？！?!]|[.…]{2,})|那[.…,.·]{2,}那|你、你|我、我|才、才|誰、誰|什、什麼|幹、幹嘛/,
+  happySocial:
+    /一起去|我們一起|一起吃|一起看看|下次一起|想跟你|陪我去|好喔|好呀|好啊|好耶|期待/,
+  angryStrong:
+    /可惡|氣死|故意的吧|你故意的|騙我|耍我|沒水準|太過分/,
 };
 
 async function setPersonaState(activity) {
@@ -254,7 +260,7 @@ const PERSONA_EVENTS_URL = "/api/persona";
  *   "thinking" |
  *   "surprised" |
  *   "goodbye" |
- *   "relax" |
+ *   "relaxed" |
  *   "sleepy" |
  *   "none"
  * }
@@ -262,26 +268,39 @@ const PERSONA_EVENTS_URL = "/api/persona";
 export function classifyPersonaAnimation(text) {
   const t = String(text || "").toLowerCase().replace(/\s+/g, " ").trim();
   if (!t) return "none";
- 
+
   const askingUser = isQuestionAboutUser(t);
   const selfHappy = emotionIsAboutSelf(t, R.happySelf);
- 
+
   if (R.surprised.test(t)) return "surprised";
-  if (emotionIsAboutSelf(t, R.embarrassed) || (!askingUser && /害羞|不好意思|臉紅|blush|shy/.test(t)))
+
+  if (
+    R.tsundere.test(t) ||
+    emotionIsAboutSelf(t, R.embarrassed) ||
+    (!askingUser && /害羞|不好意思|臉紅|blush|shy/.test(t))
+  ) {
     return "embarrassed";
+  }
+
   if (!selfHappy && emotionIsAboutSelf(t, R.praise)) return "embarrassed";
   if (emotionIsAboutSelf(t, R.angry)) return "angry";
   if (emotionIsAboutSelf(t, R.sad)) return "sad";
   if (emotionIsAboutSelf(t, R.sleepy)) return "sleepy";
+
   if (R.goodbye.test(t)) return "goodbye";
   if (R.greeting.test(t)) return "greeting";
+
   if (selfHappy) return "happy";
   if (!askingUser && R.happyReaction.test(t)) return "happy";
+  if (R.happySocial.test(t)) return "happy";
+
   if (R.thinking.test(t)) return "thinking";
-  if (emotionIsAboutSelf(t, R.relax)) return "relax";
-  if (R.comfort.test(t)) return "relax";
+  if (emotionIsAboutSelf(t, R.relax)) return "relaxed";
+  if (R.comfort.test(t)) return "relaxed";
+
+  if (R.angryStrong.test(t)) return "angry";
   if (R.surprisedWeak.test(t)) return "surprised";
- 
+
   return "none";
 }
 let lastPersonaAnimation = "";
