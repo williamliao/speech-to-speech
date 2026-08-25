@@ -12,19 +12,15 @@ services:
       - --port
       - "8765"
 
-      # STT：Faster Whisper
+      # STT：Transformers Whisper / Breeze
       - --stt
-      - faster-whisper
-      - --faster_whisper_stt_model_name
-      - large-v3
-      - --faster_whisper_stt_device
+      - whisper
+      - --stt_model_name
+      - MediaTek-Research/Breeze-ASR-25
+      - --stt_device
       - cuda
-      - --faster_whisper_stt_compute_type
+      - --stt_torch_dtype
       - float16
-      - --faster_whisper_stt_gen_language
-      - zh
-      - --faster_whisper_stt_gen_task
-      - transcribe
       - --language
       - zh
 

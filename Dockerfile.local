@@ -28,9 +28,7 @@ COPY pyproject.toml ./
 
 RUN uv venv --python 3.11 && \
     uv sync \
-      --no-install-project \
-      --no-dev \
-      --extra faster-whisper
+      --no-install-project
 
 COPY . .
 
