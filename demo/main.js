@@ -65,16 +65,16 @@ function emotionIsAboutSelf(t, emotionRegex) {
   const re = new RegExp(emotionRegex.source, emotionRegex.flags.includes("g")
     ? emotionRegex.flags
     : emotionRegex.flags + "g");
- 
+
   let m;
   while ((m = re.exec(t)) !== null) {
     const i = m.index;
     const before = t.slice(Math.max(0, i - 14), i);
     const after = t.slice(i + m[0].length, i + m[0].length + 8);
- 
+
     // 「被你誇獎」的「你」是施事者，情緒仍屬於 persona，先中和掉。
     const guard = before.replace(/被(你|妳)/g, "被");
- 
+
     // 最近的代名詞決定情緒歸屬：
     // 「那你說得我有點不好意思」→ 我 比 你 更靠近情緒詞 → 是自己的
     // 「你別難過」→ 只有你 → 是對方的
@@ -82,7 +82,7 @@ function emotionIsAboutSelf(t, emotionRegex) {
     const lastUser = Math.max(guard.lastIndexOf("你"), guard.lastIndexOf("妳"));
     if (lastSelf >= 0 && lastSelf > lastUser) return true;
     if (lastUser > lastSelf) continue;
- 
+
     // 沒有中文代名詞時，退回英文自稱 + 後方視窗
     if (SELF_RE.test(guard) || SELF_RE.test(after)) return true;
     // 「別太難過」這類祈使句是對對方說的
