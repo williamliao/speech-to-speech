@@ -709,6 +709,7 @@ Main development branch:
 ### Updating from upstream
 
 ```bash
+git status
 git fetch upstream
 git switch my-patches
 git rebase upstream/main
