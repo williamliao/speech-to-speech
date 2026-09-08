@@ -1,4 +1,4 @@
-// @ts-check
+﻿// @ts-check
 /**
  * Demo adapter around the official OpenAI Agents SDK RealtimeSession.
  *
@@ -107,6 +107,16 @@ export class S2sRealtimeClient extends EventTarget {
     this._micSrc = null;
     this._captureNode = null;
     this._playbackNode = null;
+
+    // Hold 1.2 s of WebSocket audio before playback to absorb TTS timing jitter.
+    this._startupBufferMs = 1200;
+    this._startupBufferTargetBytes = Math.ceil(
+      AUDIO_SAMPLE_RATE * 2 * this._startupBufferMs / 1000,
+    );
+    this._startupBuffering = true;
+    this._startupAudioChunks = [];
+    this._startupAudioBytes = 0;
+    this._startupAudioResponseId = "";
     this._micAnalyser = null;
     this._outAnalyser = null;
     this._remoteSrc = null;
@@ -400,19 +410,79 @@ export class S2sRealtimeClient extends EventTarget {
   /** @param {{data: ArrayBuffer, responseId?: string}} event */
   _onAudio(event) {
     if (this.options.transport !== "websocket" || !this._playbackNode) return;
-    const view = new DataView(event.data);
-    const samples = new Float32Array(event.data.byteLength / 2);
+
+    const responseId = event.responseId || this._activeResponseId || "";
+    if (!this._startupAudioResponseId && responseId) {
+      this._startupAudioResponseId = responseId;
+    }
+
+    if (this._startupBuffering) {
+      const copy = event.data.slice(0);
+      this._startupAudioChunks.push(copy);
+      this._startupAudioBytes += copy.byteLength;
+
+      if (this._startupAudioBytes >= this._startupBufferTargetBytes) {
+        this._flushStartupAudio(responseId);
+      }
+      return;
+    }
+
+    this._playAudioBuffer(event.data, responseId);
+  }
+
+  /** @param {ArrayBuffer} buffer @param {string} [responseId] */
+  _playAudioBuffer(buffer, responseId = "") {
+    if (!this._playbackNode) return;
+
+    const view = new DataView(buffer);
+    const samples = new Float32Array(buffer.byteLength / 2);
     for (let i = 0; i < samples.length; i += 1) {
       const sample = view.getInt16(i * 2, true);
       samples[i] = sample < 0 ? sample / 0x8000 : sample / 0x7fff;
     }
-    this._playbackNode.port.postMessage({ kind: "audio", samples }, [samples.buffer]);
-    if (event.responseId) this._audibleResponses.add(event.responseId);
+
+    this._playbackNode.port.postMessage(
+      { kind: "audio", samples },
+      [samples.buffer],
+    );
+
+    if (responseId) this._audibleResponses.add(responseId);
     this._aiSpeaking = true;
     this._markAudible();
   }
 
+  /** @param {string} [responseId] */
+  _flushStartupAudio(responseId = "") {
+    if (!this._startupAudioChunks.length) return;
+
+    const merged = new Uint8Array(this._startupAudioBytes);
+    let offset = 0;
+    for (const chunk of this._startupAudioChunks) {
+      merged.set(new Uint8Array(chunk), offset);
+      offset += chunk.byteLength;
+    }
+
+    const effectiveResponseId =
+      responseId || this._startupAudioResponseId || "";
+
+
+    this._startupAudioChunks = [];
+    this._startupAudioBytes = 0;
+    this._startupBuffering = false;
+    this._startupAudioResponseId = effectiveResponseId;
+
+    this._playAudioBuffer(merged.buffer, effectiveResponseId);
+  }
+
+  _resetStartupAudio() {
+    this._startupAudioChunks = [];
+    this._startupAudioBytes = 0;
+    this._startupAudioResponseId = "";
+    this._startupBuffering = true;
+  }
+
   _clearPlayback() {
+    this._resetStartupAudio();
     this._playbackNode?.port.postMessage({ kind: "clear" });
     this._aiSpeaking = false;
   }
@@ -458,6 +528,7 @@ export class S2sRealtimeClient extends EventTarget {
         break;
       }
       case "response.created":
+        if (this.options.transport === "websocket") this._resetStartupAudio();
         this._responseRequested = false;
         this._activeResponseId = event.response?.id ?? "";
         if (this._status === "connected" || this._status === "user-speaking") this._setStatus("processing");
@@ -546,6 +617,15 @@ export class S2sRealtimeClient extends EventTarget {
         break;
       }
       case "response.done": {
+        if (
+          this.options.transport === "websocket" &&
+          this._startupBuffering &&
+          this._startupAudioChunks.length
+        ) {
+          const startupResponseId =
+            event.response?.id ?? this._activeResponseId ?? "";
+          this._flushStartupAudio(startupResponseId);
+        }
         const responseId = event.response?.id ?? "";
         this._responseRequested = false;
         this._activeResponseId = "";
@@ -698,7 +778,7 @@ export class S2sRealtimeClient extends EventTarget {
     }
     if (response.status === 503) {
       const body = await response.json().catch(() => ({}));
-      if (body?.state === "at_capacity") throw codedError("The queue is full — try again shortly.", "queue-full");
+      if (body?.state === "at_capacity") throw codedError("The queue is full 窶・try again shortly.", "queue-full");
     }
     if (!response.ok) throw new Error(`/session failed (${response.status}): ${await response.text()}`);
     const json = await response.json();
@@ -803,3 +883,4 @@ export class S2sRealtimeClient extends EventTarget {
     this._setStatus("closed");
   }
 }
+

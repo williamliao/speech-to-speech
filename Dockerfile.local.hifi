@@ -1,0 +1,46 @@
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV UV_LINK_MODE=copy
+ENV UV_TORCH_BACKEND=cu128
+ENV PATH="/usr/src/app/.venv/bin:/root/.local/bin:${PATH}"
+
+WORKDIR /usr/src/app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    build-essential \
+    cmake \
+    ffmpeg \
+    libsndfile1 \
+    portaudio19-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN uv --version
+RUN uv python install 3.11
+
+COPY pyproject.toml ./
+
+RUN uv venv --python 3.11 && \
+    uv sync \
+      --no-install-project
+
+COPY . .
+
+# Build-time only: host Git-tracked source remains untouched.
+COPY patch_realtime_hifi_output.py /tmp/patch_realtime_hifi_output.py
+RUN python /tmp/patch_realtime_hifi_output.py && \
+    python -m py_compile \
+      /usr/src/app/src/speech_to_speech/TTS/openai_compatible_handler.py \
+      /usr/src/app/src/speech_to_speech/api/openai_realtime/handlers/audio.py
+
+RUN uv sync --no-dev --extra faster-whisper
+
+RUN python -c "from speech_to_speech.TTS.openai_compatible_handler import PIPELINE_SAMPLE_RATE; assert PIPELINE_SAMPLE_RATE == 24000; from speech_to_speech.api.openai_realtime.handlers.audio import OUTBOUND_TTS_SAMPLE_RATE; assert OUTBOUND_TTS_SAMPLE_RATE == 24000; print('Hi-Fi realtime TTS patch import OK: 24 kHz outbound')"
+
+CMD ["speech-to-speech"]
