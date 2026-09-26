@@ -368,6 +368,7 @@ class OpenAICompatibleTTSHandler(BaseHandler[TTSIn, TTSOut]):
         api_key: str | None = None,
         model: str = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
         voice: str = "aiden",
+        lock_voice: bool = False,
         language: str | None = None,
         task_type: str | None = None,
         instructions: str | None = None,
@@ -398,6 +399,7 @@ class OpenAICompatibleTTSHandler(BaseHandler[TTSIn, TTSOut]):
         self.api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
         self.model = model
         self.voice = voice
+        self.lock_voice = lock_voice
         self.language = language
         self.task_type = task_type
         self.instructions = instructions
@@ -622,6 +624,9 @@ class OpenAICompatibleTTSHandler(BaseHandler[TTSIn, TTSOut]):
         runtime_config: RuntimeConfig | None,
         response: Any,
     ) -> str | dict[str, str]:
+        if self.lock_voice:
+            return self.voice
+
         if response and response.audio and response.audio.output and response.audio.output.voice:
             return self._serialize_voice(response.audio.output.voice)
         if runtime_config is not None:

@@ -1,5 +1,0 @@
-services:
-  pipeline:
-    build:
-      context: .
-      dockerfile: Dockerfile.local.hifi

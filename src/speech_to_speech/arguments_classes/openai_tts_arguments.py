@@ -58,3 +58,10 @@ class OpenAICompatibleTTSHandlerArguments:
         default=512,
         metadata={"help": "Pipeline output chunk size in 16 kHz samples."},
     )
+    openai_tts_lock_voice: bool = field(
+        default=False,
+        metadata={
+            "help": "Always use --openai_tts_voice and ignore per-session or per-response voice overrides."
+        },
+    )
+    
