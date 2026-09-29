@@ -817,7 +817,7 @@ Main development branches:
 
 ### Changes in `my-patches`
 
-- Buffer Qwen3-TTS input until sentence/clause boundaries to improve prosody
+- Buffer Breeze TTS 2 input until sentence/clause boundaries to improve prosody
 - Add per-turn TTS voice direction support
   - Allow the LLM to emit a leading `<voice>...</voice>` directive for each response
   - Strip the voice directive from the visible/spoken transcript
