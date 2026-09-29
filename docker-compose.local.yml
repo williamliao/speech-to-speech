@@ -49,16 +49,16 @@ services:
       - --tts
       - openai
       - --openai_tts_base_url
-      - http://host.docker.internal:18881/v1
+      - http://host.docker.internal:7860/v1
       - --openai_tts_model
-      - openbmb/VoxCPM2
+      - breeze-tts-2
       - --openai_tts_voice
       - default
       - --openai_tts_lock_voice
       - --openai_tts_response_format
       - pcm
       - --openai_tts_sample_rate
-      - "48000"
+      - "24000"
       - --openai_tts_stream
       - "true"
 

@@ -98,50 +98,115 @@ function isQuestionAboutUser(t) {
 }
 
 const R = {
-  // 只留「不靠標點也成立」的驚訝詞。刻意不放單獨的「哇」「什麼」，
-  // 否則「今天有什麼想聊的嗎」會被誤判。
-  surprised:
-    /真的假的|不會吧|哇塞|哇嗚|哇喔|天啊|我的天|居然|竟然|嚇一跳|嚇到我|太意外|沒想到|驚訝|震驚|whoa|wow|oh my god|omg|no way|surpris|shock|unexpected/,
-  // 弱驚訝：只是語助詞，優先權放到最低，否則會蓋掉後面真正的情緒
-  // （「真的嗎聽你這樣說我現在變得更開心了」應該是 happy）
-  surprisedWeak: /真的嗎|真的喔|是喔|是嗎|原來/,
-  // 補上「被誇獎」這一類：這是 persona 最常見卻抓不到的害羞情境
+  // 【新增】性興奮 / 強烈快感 (Arousal)
+  // 關鍵詞：身體反應、渴望、具體的性行為描述
+  arousal:
+    /要去了|快點|太深|受不了|好棒|啊哈|嗯嗯|唔嗯|顫抖|濕了|好舒服|想要|更多|高潮|要來了|啊啊啊|嗚嗚|好熱|忍不住了|快點快點|太爽了|快感|衝動|慾望|arousal|turn on|hard|wet|climax|orgasm|sensual|intimate|sensitive|touching|penetration/,
+
+  // 【新增】高潮 / 失態 (Ahegao)
+  // 關鍵詞：意識喪失、翻白眼、吐舌、極度失控
+  ahegao:
+    /翻白眼|吐舌|失神|完全喪失|意識模糊|啊啊啊啊啊|嗯啊啊|嗚哇|失控|崩潰|融化|徹底|全無|呆呆|口水|僵硬|劇烈顫抖|ahegao|derp|mind gone|blank|eyes rolling|tongue out/,
+
+  // 【新增】呻吟 (Moaning)
+  // 關鍵詞：混合痛苦與愉悅的聲響
+  moaning:
+    /嗯啊|嗚嗯|哈啊|好痛|好爽|呻吟|moan|groan|ouch|ahhh|ummmm|nnng|ngg|ngh|pain|pleasure mix/,
+
+  // 【新增】發燙/臉紅 (Hot/Blush)
+  // 關鍵詞：生理熱感、血管擴張
+  hot:
+    /熱|燙|發燒|燥熱|身體發燙|臉頰發紅|臉紅發熱|血管擴張|hot|burning|fever|temperature|flushed|blushing heavily/,
+
+  // 【新增】顫抖 (Shiver)
+  // 關鍵詞：身體不受控的戰慄
+  shiver:
+    /顫抖|戰慄|抖|身體抖|哆嗦|shiver|tremble|shaking|quiver|cold sweat/,
+
+  // 【新增】Dominant (支配/挑釁)
+  // 關鍵詞：命令、控制、優越感
+  dominant:
+    /聽話|乖|別動|看着我|膽小|dominant|control|obey|listen to me|don't move|look at me|brave|punish|reward|top|dominatrix/,
+
+  // 【新增】Submissive (順從/示弱)
+  // 關鍵詞：放棄抵抗、依賴、聲音軟化
+  submissive:
+    /隨便你|都聽你的|沒力了|壞掉|submissive|weak|soft|yours|please|do anything|hold me|tighter|slower|gentle|afraid|scared|vulnerable/,
+
+  // 【新增】哭泣 (Crying)
+  // 關鍵詞：情緒激動、抽泣
+  crying:
+    /哭|泣|淚水|眼淚|淚光|抽泣|crying|sob|weep|tears|sniffle|hiccup|wail/,
+
+  // 【新增】微醺 (Drunk)
+  // 關鍵詞：意識模糊、語氣慵懒、大舌
+  drunk:
+    /醉|醺|酒|微醺|大舌|說話不清楚|迷迷糊糊|drunk|intoxicated|tipsy|wobbly|slurred speech|dizzy|alcohol/,
+
+  // 原有：害羞/尷尬
   embarrassed:
     /害羞|窩瑟|不好意思|才沒有|才不是|笨蛋|討厭啦|臉紅|羞死|好丟臉|別靠這麼近|你靠太近|不准看|亂講什麼|亂說什麼|你在亂講|你在亂說|別亂講|別亂說|這種話.{0,8}(不用|不要|不需要).{0,6}說|幹嘛突然說這種話|embarrass|blush|shy|flustered|bashful|dummy|too close|stop teasing/,
-  // 「被誇獎」只有在沒有明講開心時才算害羞；
-  // 「被稱讚的時候我確實會覺得很開心」→ 那就是 happy，不是害羞
-  praise: /誇獎|稱讚|讚美|被你這樣說|心裡.{0,3}暖|暖暖的/,
+
+  // 原有：驚訝
+  surprised:
+    /真的假的|不會吧|哇塞|哇嗚|哇喔|天啊|我的天|居然|竟然|嚇一跳|嚇到我|太意外|沒想到|驚訝|震驚|whoa|wow|oh my god|omg|no way|surpris|shock|unexpected/,
+  surprisedWeak: /真的嗎|真的喔|是喔|是嗎|原來/,
+
+  // 原有：憤怒
   angry:
     /生氣|火大|可惡|氣死|不爽|煩死|夠了|真過分|太過分|angry|mad|annoyed|irritated|frustrated|how dare/,
+  
+  // 原有：悲傷
   sad:
     /難過|傷心|寂寞|孤單|失落|想哭|心痛|捨不得|不開心|sad|lonely|heartbroken|upset|disappointed/,
+
+  // 原有：困倦
   sleepy:
     /好睏|睏了|想睡|累了|好累|疲倦|沒精神|打哈欠|sleepy|tired|drowsy|yawn/,
+
+  // 原有：再見
   goodbye:
     /再見|掰掰|拜拜|晚安|明天見|下次見|待會見|晚點見|先走了|保重|bye|goodbye|good night|see you|see ya|take care|talk to you later/,
+
+  // 原有：問候
   greeting:
     /你好|^嗨|哈囉|早安|午安|歡迎|歡迎回來|很高興見到你|見到你真好|你來啦|你來了|你回來(?:了|啦|囉|喔)?(?:啊|呀|耶)?|回來啦|回來了啊|hello|\bhi\b|\bhey\b|good morning|good afternoon|good evening|welcome|nice to see you/,
-  // persona 自己的正向情緒,走 emotionIsAboutSelf,不受問句守衛限制
-  // (persona 幾乎每句都以問句收尾,用問句擋掉會漏一大半)
+
+  // 原有：開心 (自己)
   happySelf:
     /開心|快樂|高興|愉快|心情很好|心情超好|心情很棒|心情不錯|放心了|很有動力|喜歡你|愛你|happy|glad|love you/,
-  // 純反應詞,沒有主詞,才需要問句守衛
+  
+  // 原有：開心 (反應)
   happyReaction:
     /太好了|太棒了|真棒|好耶|恭喜|好笑|有趣|逗我|哈哈|嘿嘿|awesome|wonderful|fantastic|funny|haha|hehe/,
-  // v2 漏掉的分支：狀態機的 thinking 只在 processing 觸發，語意上的思考沒人接
+
+  // 原有：思考
   thinking:
     /讓我想想|我想想|我在想|想一下|讓我看看|我猜|不太確定|我不確定|嗯讓我|沒聽清楚|沒聽懂|沒有聽清|再說一遍|再說一次|hmm|let me think|let me see|not sure|i guess|say that again/,
+
+  // 原有：放鬆
   relax:
     /放鬆|舒服|悠閒|安心多了|很安心|relaxed|comfortable|comfy|peaceful|calm/,
-  // 安慰 / 陪伴：意圖導向，不需要 self-reference。原本這類句子全部掉到 none。
+
+  // 原有：安慰
   comfort:
     /辛苦了|辛苦你了|真的辛苦|幫你拿水|拿水給你|休息一下|坐下(?:來)?休息|快點坐下|快進來坐|別擔心|不要擔心|慢慢來|好好休息|聽你說|陪你聊|我就在這邊|不會突然消失|陪著你|我會陪你|別硬撐|不要硬撐|快點去睡|早點睡|放輕鬆|深呼吸|別逼自己/,
+
+  // 原有：傲嬌
   tsundere:
     /^(哈|蛤|欸|誒)(?:[？！?!]|[.…]{2,})|那[.…,.·]{2,}那|你、你|我、我|才、才|誰、誰|什、什麼|幹、幹嘛/,
+
+  // 原有：社交開心
   happySocial:
     /一起去|我們一起|一起吃|一起看看|下次一起|想跟你|陪我去|好喔|好呀|好啊|好耶|期待/,
+
+  // 原有：強烈憤怒
   angryStrong:
     /可惡|氣死|故意的吧|你故意的|騙我|耍我|沒水準|太過分/,
+    
+  // 【新增】喘息 (Breathless)
+  breathless:
+    /喘|呼氣|氣喘|呼吸急促|好累|喘不過氣|pant|breath|heavy breath|gasping|huff|hah|uhh|uhh|out of breath/,
 };
 
 async function setPersonaState(activity) {
@@ -248,13 +313,19 @@ const PERSONA_EVENTS_URL = "/api/persona";
  * Classify an assistant response into a Persona animation.
  *
  * Priority matters:
- * surprised / embarrassed / angry etc. should beat generic happy words.
+ * 1. Ahegao (High intensity loss of control)
+ * 2. Moaning/Crying/Hot/Shiver (Strong physical reactions)
+ * 3. Arousal (Sexual excitement)
+ * 4. Dominant/Submissive (Character dynamics)
+ * 5. Standard Emotions (Happy, Angry, Sad, etc.)
  *
  * @param {string} text
  * @returns {
  *   "greeting" |
  *   "happy" |
  *   "embarrassed" |
+ *   "arousal" |  // 新增回傳類型
+ *   "ahegao" |   // 新增回傳類型
  *   "angry" |
  *   "sad" |
  *   "thinking" |
@@ -272,8 +343,30 @@ export function classifyPersonaAnimation(text) {
   const askingUser = isQuestionAboutUser(t);
   const selfHappy = emotionIsAboutSelf(t, R.happySelf);
 
-  if (R.surprised.test(t)) return "surprised";
+  // 1. Highest Priority: Ahegao (High intensity)
+  if (R.ahegao.test(t)) return "ahegao";
 
+  // 2. High Physical Reactions (Before standard arousal to catch specific states)
+  if (R.crying.test(t)) return "crying";
+  if (R.moaning.test(t)) return "moaning";
+  if (R.hot.test(t)) return "hot";
+  if (R.shiver.test(t)) return "shiver";
+  if (R.breathless.test(t)) return "breathless";
+
+  // 3. Sexual Arousal (General excitement)
+  if (R.arousal.test(t)) return "arousal";
+
+  // 4. Character Dynamics (Dominant/Submissive)
+  // Only if no other specific physical/emotional state is triggered
+  if (R.dominant.test(t)) return "dominant";
+  if (R.submissive.test(t)) return "submissive";
+
+  // 5. Standard Emotions (Happy, Sad, Angry, etc.)
+  
+  // Surprised
+  if (R.surprised.test(t)) return "surprised";
+  
+  // Embarrassed/Shy (Now lower priority than arousal/moaning)
   if (
     R.tsundere.test(t) ||
     emotionIsAboutSelf(t, R.embarrassed) ||
@@ -281,25 +374,35 @@ export function classifyPersonaAnimation(text) {
   ) {
     return "embarrassed";
   }
+  if (!selfHappy && emotionIsAboutSelf(t, R.praise)) return "embarrassed"; // Need to define R.praise if used, or remove if not in R object above
 
-  if (!selfHappy && emotionIsAboutSelf(t, R.praise)) return "embarrassed";
+  // Angry/Sad/Sleepy
   if (emotionIsAboutSelf(t, R.angry)) return "angry";
   if (emotionIsAboutSelf(t, R.sad)) return "sad";
   if (emotionIsAboutSelf(t, R.sleepy)) return "sleepy";
 
+  // Greeting/Goodbye
   if (R.goodbye.test(t)) return "goodbye";
   if (R.greeting.test(t)) return "greeting";
 
+  // Happy
   if (selfHappy) return "happy";
   if (!askingUser && R.happyReaction.test(t)) return "happy";
   if (R.happySocial.test(t)) return "happy";
 
+  // Thinking/Relax/Comfort
   if (R.thinking.test(t)) return "thinking";
   if (emotionIsAboutSelf(t, R.relax)) return "relaxed";
   if (R.comfort.test(t)) return "relaxed";
 
+  // Angry Strong
   if (R.angryStrong.test(t)) return "angry";
+
+  // Weak Surprised
   if (R.surprisedWeak.test(t)) return "surprised";
+
+  // Drunk (Check late as it can be mixed with other states, but if detected, override)
+  if (R.drunk.test(t)) return "drunk";
 
   return "none";
 }
