@@ -810,7 +810,7 @@ Citations for optional backends such as Kokoro, Pocket TTS, ChatTTS, Whisper var
 
 This repository is my personal fork of Hugging Face's `speech-to-speech`.
 
-Main development branch:
+Main development branches:
 
 - `main` — tracks upstream
 - `my-patches` — my local/self-hosted modifications
@@ -818,6 +818,12 @@ Main development branch:
 ### Changes in `my-patches`
 
 - Buffer Qwen3-TTS input until sentence/clause boundaries to improve prosody
+- Add per-turn TTS voice direction support
+  - Allow the LLM to emit a leading `<voice>...</voice>` directive for each response
+  - Strip the voice directive from the visible/spoken transcript
+  - Pass the extracted directive through `TTSInput`
+  - Forward dynamic voice instructions to OpenAI-compatible TTS backends
+  - Fall back to the configured `--openai_tts_instructions` when no per-turn directive is provided
 - Add self-hosted realtime demo/debug clients
 - Add Persona desktop character integration
 - Custom Docker / Docker Compose configuration
