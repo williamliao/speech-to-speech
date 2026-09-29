@@ -59,6 +59,9 @@ class LMOutputProcessor(BaseHandler[LLMOut, TTSIn | PipelineEvent]):
         self._tool_call_ids: list[str] = []
         self._output_sequence = 0
 
+        self._voice_buffer = ""
+        self._voice_instruction: str | None = None
+        self._voice_header_done = False
     def _start_response(self, response_key: str | None) -> str:
         key = response_key or self._response_key or uuid4().hex
         self._response_key = key
@@ -68,6 +71,49 @@ class LMOutputProcessor(BaseHandler[LLMOut, TTSIn | PipelineEvent]):
         self._response_key = None
         self._tool_call_ids = []
         self._output_sequence = 0
+
+        self._voice_buffer = ""
+        self._voice_instruction = None
+        self._voice_header_done = False
+    def _consume_voice_prefix(self, text: str) -> str | None:
+        # Extract one optional leading <voice>...</voice> block from streamed LLM text.
+        if self._voice_header_done:
+            return text
+
+        self._voice_buffer += text
+        opening = "<voice>"
+        closing = "</voice>"
+        candidate = self._voice_buffer.lstrip()
+
+        # Opening tag can itself be split across chunks.
+        if opening.startswith(candidate):
+            return None
+
+        # No voice header: fail open and preserve all original text.
+        if not candidate.startswith(opening):
+            spoken = self._voice_buffer
+            self._voice_buffer = ""
+            self._voice_header_done = True
+            return spoken
+
+        end = candidate.find(closing, len(opening))
+        if end < 0:
+            if len(self._voice_buffer) > 512:
+                logger.warning("Voice Direction header exceeded 512 chars; forwarding buffered text unchanged")
+                spoken = self._voice_buffer
+                self._voice_buffer = ""
+                self._voice_instruction = None
+                self._voice_header_done = True
+                return spoken
+            return None
+
+        instruction = candidate[len(opening):end].strip()
+        self._voice_instruction = instruction or None
+        spoken = candidate[end + len(closing):].lstrip()
+        self._voice_buffer = ""
+        self._voice_header_done = True
+        logger.debug("Voice Direction: %r", self._voice_instruction)
+        return spoken
 
     def _notify_generation_done(
         self,
@@ -178,6 +224,13 @@ class LMOutputProcessor(BaseHandler[LLMOut, TTSIn | PipelineEvent]):
         response_key = self._start_response(lm_output.response_key)
 
         for part in lm_output.parts:
+            if isinstance(part, AssistantTextPart):
+                spoken_text = self._consume_voice_prefix(part.text)
+                if spoken_text is None:
+                    continue
+                part = AssistantTextPart(text=spoken_text)
+                if not part.text:
+                    continue
             output_sequence = self._output_sequence
             self._output_sequence += 1
             if isinstance(part, AssistantToolCallPart) and part.tool.call_id not in self._tool_call_ids:
@@ -211,6 +264,7 @@ class LMOutputProcessor(BaseHandler[LLMOut, TTSIn | PipelineEvent]):
             logger.debug("Forwarding to TTS: %s", transcript_for_log(part.text))
             yield TTSInput(
                 text=part.text,
+                instruction=self._voice_instruction,
                 language_code=lm_output.language_code,
                 runtime_config=lm_output.runtime_config,
                 response=lm_output.response,

@@ -203,6 +203,7 @@ class TTSInput(PipelineMessage):
 
     tag: Literal["tts_input"] = "tts_input"
     text: str
+    instruction: Optional[str] = None
     language_code: Optional[str] = None
     runtime_config: RuntimeConfig | None = None
     response: RealtimeResponseCreateParams | None = None

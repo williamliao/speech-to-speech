@@ -512,7 +512,11 @@ class OpenAICompatibleTTSHandler(BaseHandler[TTSIn, TTSOut]):
 
         try:
             voice = self._resolve_voice(tts_input.runtime_config, tts_input.response)
-            operation = self._make_operation(text=text, voice=voice)
+            operation = self._make_operation(
+                text=text,
+                voice=voice,
+                instructions=tts_input.instruction,
+            )
             with self._operation_lock:
                 self._active_operation = operation
             source_chunks = operation.iter_bytes(cancel_check)
@@ -583,11 +587,16 @@ class OpenAICompatibleTTSHandler(BaseHandler[TTSIn, TTSOut]):
         *,
         text: str,
         voice: str | dict[str, str],
+        instructions: str | None = None,
     ) -> HttpSpeechOperation:
         return HttpSpeechOperation(
             endpoint_url=self.endpoint_url,
             api_key=self.api_key,
-            payload=self._request_payload(text=text, voice=voice),
+            payload=self._request_payload(
+                text=text,
+                voice=voice,
+                instructions=instructions,
+            ),
             timeout_s=self.timeout,
             response_format=self.response_format,
         )
@@ -597,6 +606,7 @@ class OpenAICompatibleTTSHandler(BaseHandler[TTSIn, TTSOut]):
         *,
         text: str,
         voice: str | dict[str, str],
+        instructions: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -615,8 +625,9 @@ class OpenAICompatibleTTSHandler(BaseHandler[TTSIn, TTSOut]):
             payload["language"] = self.language
         if self.task_type:
             payload["task_type"] = self.task_type
-        if self.instructions:
-            payload["instructions"] = self.instructions
+        effective_instructions = self.instructions if instructions is None else instructions
+        if effective_instructions:
+            payload["instructions"] = effective_instructions
         return payload
 
     def _resolve_voice(
